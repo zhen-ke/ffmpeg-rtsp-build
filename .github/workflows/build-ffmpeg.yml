@@ -23,8 +23,8 @@ jobs:
 
       - name: Build FFmpeg XCFrameworks
         run: |
-          chmod +x build-ffmpeg.sh
-          ./build-ffmpeg.sh ${{ inputs.ffmpeg_version }}
+            chmod +x scripts/build.sh
+            ./scripts/build.sh ${{ inputs.ffmpeg_version }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
