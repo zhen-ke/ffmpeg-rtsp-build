@@ -1,39 +1,33 @@
-name: Build FFmpeg RTSP XCFramework
+name: Build FFmpeg XCFrameworks
 
 on:
-  workflow_dispatch: # 允许手动触发
+  workflow_dispatch:
     inputs:
       ffmpeg_version:
-        description: 'FFmpeg Version'
+        description: "FFmpeg version (e.g. 6.1)"
         required: true
-        default: '6.1'
+        default: "6.1"
 
 jobs:
   build:
-    runs-on: macos-latest
-    
+    runs-on: macos-14
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Install Dependencies
+      - name: Install dependencies
         run: |
-          brew install automake fdk-aac git libtool pkg-config shtool yasm nasm wget
+          brew update
+          brew install nasm pkg-config
 
-      - name: Download gas-preprocessor
+      - name: Build FFmpeg XCFrameworks
         run: |
-          # FFmpeg 编译 ARM 架构需要这个脚本处理汇编
-          mkdir -p /usr/local/bin
-          wget https://github.com/libav/gas-preprocessor/raw/master/gas-preprocessor.pl
-          chmod +x gas-preprocessor.pl
-          sudo mv gas-preprocessor.pl /usr/local/bin/
+          chmod +x build-ffmpeg.sh
+          ./build-ffmpeg.sh ${{ inputs.ffmpeg_version }}
 
-      - name: Build FFmpeg
-        run: |
-          chmod +x scripts/build.sh
-          ./scripts/build.sh ${{ inputs.ffmpeg_version }}
-
-      - name: Upload Artifacts
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ffmpeg-xcframework
-          path: output/xcframeworks/
+          name: ffmpeg-xcframeworks
+          path: output/xcframeworks
