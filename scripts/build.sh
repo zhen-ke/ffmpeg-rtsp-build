@@ -1,145 +1,159 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
-# ==========================================
-# 配置区域
-# ==========================================
-FFMPEG_VERSION=$1
-WORK_DIR=$(pwd)
-SOURCE_DIR="$WORK_DIR/ffmpeg-$FFMPEG_VERSION"
-OUTPUT_DIR="$WORK_DIR/output"
-THIN_DIR="$OUTPUT_DIR/thin"
-FAT_DIR="$OUTPUT_DIR/fat"
+# IPCams FFmpeg build script
+# - Builds only what this project uses (avformat/avcodec/avutil)
+# - Video decode is done by VideoToolbox, so swscale/swresample are not required
 
-# 1. 下载源码 (如果不存在)
-if [ ! -d "$SOURCE_DIR" ]; then
-    echo "Downloading FFmpeg $FFMPEG_VERSION..."
-    curl -O https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.bz2
-    tar xjvf ffmpeg-$FFMPEG_VERSION.tar.bz2
-fi
+FFMPEG_VERSION="${1:-7.1.1}"
+IOS_MIN="${IOS_MIN:-16.0}"
+MACOS_MIN="${MACOS_MIN:-13.0}"
 
-cd "$SOURCE_DIR"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+BUILD_ROOT="${REPO_ROOT}/.ffmpeg-build"
+SOURCE_DIR="${BUILD_ROOT}/ffmpeg-${FFMPEG_VERSION}"
+OUTPUT_ROOT="${REPO_ROOT}/ffmpeg-artifacts/${FFMPEG_VERSION}"
+THIN_DIR="${OUTPUT_ROOT}/thin"
+FAT_DIR="${OUTPUT_ROOT}/fat"
+XCFRAMEWORK_DIR="${OUTPUT_ROOT}/xcframeworks"
 
-# ==========================================
-# 🔥 核心配置：工业级 RTSP 专用 (无软解)
-# ==========================================
-COMMON_FLAGS="
-    --disable-everything 
-    --enable-protocol=rtsp,tcp,udp,file 
-    --enable-demuxer=rtsp,mov,mpegts 
-    --enable-parser=h264,hevc,aac 
-    --disable-debug 
-    --disable-doc 
-    --disable-programs 
-    --disable-avdevice 
-    --disable-avfilter 
-    --disable-postproc 
-    --disable-swscale 
-    --disable-swresample 
-    --enable-cross-compile 
+mkdir -p "${BUILD_ROOT}" "${THIN_DIR}" "${FAT_DIR}" "${XCFRAMEWORK_DIR}"
+
+download_ffmpeg_source() {
+    if [[ -d "${SOURCE_DIR}" ]]; then
+        return
+    fi
+
+    pushd "${BUILD_ROOT}" >/dev/null
+
+    local xz_archive="ffmpeg-${FFMPEG_VERSION}.tar.xz"
+    local bz2_archive="ffmpeg-${FFMPEG_VERSION}.tar.bz2"
+
+    if curl -fL -o "${xz_archive}" "https://ffmpeg.org/releases/${xz_archive}"; then
+        tar -xf "${xz_archive}"
+    else
+        echo "xz archive not found, trying bz2..."
+        curl -fL -o "${bz2_archive}" "https://ffmpeg.org/releases/${bz2_archive}"
+        tar -xjf "${bz2_archive}"
+    fi
+
+    popd >/dev/null
+}
+
+COMMON_FLAGS=(
+    --disable-everything
+    --disable-autodetect
+    --disable-debug
+    --disable-doc
+    --disable-programs
+    --disable-avdevice
+    --disable-avfilter
+    --disable-postproc
+    --disable-swscale
+    --disable-swresample
+    --disable-iconv
+    --enable-static
+    --disable-shared
+    --enable-avcodec
+    --enable-avformat
+    --enable-avutil
+    --enable-network
+    --enable-protocol=file,rtp,rtsp,tcp,udp
+    --enable-demuxer=rtsp,rtp,sdp,mov,mpegts
+    --enable-parser=h264,hevc,aac
+    --enable-decoder=aac,pcm_alaw,pcm_mulaw,adpcm_g726,adpcm_g726le
+    --enable-bsf=h264_mp4toannexb,hevc_mp4toannexb,aac_adtstoasc
+    --enable-cross-compile
     --enable-pic
     --target-os=darwin
     --pkg-config-flags=--static
-"
+)
 
-# 编译函数
 build_arch() {
-    ARCH=$1
-    PLATFORM=$2 # iphoneos, iphonesimulator, macosx
-    
-    echo "Building for $PLATFORM ($ARCH)..."
-    
-    # 清理上次编译残留
-    make distclean > /dev/null 2>&1 || true
-    
-    SDK_PATH=$(xcrun --sdk $PLATFORM --show-sdk-path)
-    CC="xcrun -sdk $PLATFORM clang"
-    CXX="xcrun -sdk $PLATFORM clang++"
-    
-    # 针对不同架构的 Flags
-    # 注意：已移除 -fembed-bitcode (Xcode 15+ 不再支持)
-    if [ "$PLATFORM" == "macosx" ]; then
-        TARGET_FLAGS="-arch $ARCH -isysroot $SDK_PATH -mmacosx-version-min=10.15"
-    elif [ "$PLATFORM" == "iphonesimulator" ]; then
-        TARGET_FLAGS="-arch $ARCH -isysroot $SDK_PATH -mios-simulator-version-min=12.0"
+    local arch="$1"
+    local sdk="$2"
+
+    echo "==> Building ${sdk}/${arch}"
+
+    local sdk_path
+    sdk_path="$(xcrun --sdk "${sdk}" --show-sdk-path)"
+
+    local target_flags
+    if [[ "${sdk}" == "macosx" ]]; then
+        target_flags="-arch ${arch} -isysroot ${sdk_path} -mmacosx-version-min=${MACOS_MIN}"
+    elif [[ "${sdk}" == "iphonesimulator" ]]; then
+        target_flags="-arch ${arch} -isysroot ${sdk_path} -mios-simulator-version-min=${IOS_MIN}"
     else
-        # iphoneos
-        TARGET_FLAGS="-arch $ARCH -isysroot $SDK_PATH -miphoneos-version-min=12.0"
+        target_flags="-arch ${arch} -isysroot ${sdk_path} -miphoneos-version-min=${IOS_MIN}"
     fi
 
-    ./configure \
-        $COMMON_FLAGS \
-        --arch=$ARCH \
-        --cc="$CC" \
-        --cxx="$CXX" \
-        --sysroot="$SDK_PATH" \
-        --extra-cflags="$TARGET_FLAGS" \
-        --extra-ldflags="$TARGET_FLAGS" \
-        --prefix="$THIN_DIR/$PLATFORM/$ARCH"
+    local prefix="${THIN_DIR}/${sdk}/${arch}"
+    mkdir -p "${prefix}"
 
-    # 使用所有核心进行编译
-    make -j$(sysctl -n hw.logicalcpu)
+    pushd "${SOURCE_DIR}" >/dev/null
+    make distclean >/dev/null 2>&1 || true
+
+    ./configure \
+        "${COMMON_FLAGS[@]}" \
+        --arch="${arch}" \
+        --cc="$(xcrun --sdk "${sdk}" -f clang)" \
+        --cxx="$(xcrun --sdk "${sdk}" -f clang++)" \
+        --sysroot="${sdk_path}" \
+        --extra-cflags="${target_flags}" \
+        --extra-ldflags="${target_flags}" \
+        --prefix="${prefix}"
+
+    make -j"$(sysctl -n hw.logicalcpu)"
     make install
+    popd >/dev/null
 }
 
-# ==========================================
-# 2. 开始编译各个架构
-# ==========================================
+create_xcframeworks() {
+    echo "==> Merging static libraries"
+    mkdir -p "${FAT_DIR}/ios" "${FAT_DIR}/simulator" "${FAT_DIR}/macos"
 
-# iOS Device
+    local libs=(libavcodec libavformat libavutil)
+    for lib in "${libs[@]}"; do
+        cp "${THIN_DIR}/iphoneos/arm64/lib/${lib}.a" "${FAT_DIR}/ios/${lib}.a"
+
+        lipo -create \
+            "${THIN_DIR}/iphonesimulator/arm64/lib/${lib}.a" \
+            "${THIN_DIR}/iphonesimulator/x86_64/lib/${lib}.a" \
+            -output "${FAT_DIR}/simulator/${lib}.a"
+
+        lipo -create \
+            "${THIN_DIR}/macosx/arm64/lib/${lib}.a" \
+            "${THIN_DIR}/macosx/x86_64/lib/${lib}.a" \
+            -output "${FAT_DIR}/macos/${lib}.a"
+
+        local headers="${THIN_DIR}/iphoneos/arm64/include"
+        xcodebuild -create-xcframework \
+            -library "${FAT_DIR}/ios/${lib}.a" -headers "${headers}" \
+            -library "${FAT_DIR}/simulator/${lib}.a" -headers "${headers}" \
+            -library "${FAT_DIR}/macos/${lib}.a" -headers "${headers}" \
+            -output "${XCFRAMEWORK_DIR}/${lib}.xcframework"
+    done
+}
+
+print_decoder_hints() {
+    echo
+    echo "==> Build done"
+    echo "Artifacts: ${XCFRAMEWORK_DIR}"
+    echo
+    echo "Recommended decoder checks in FFmpeg config.h during CI logs:"
+    echo "  CONFIG_PCM_ALAW_DECODER"
+    echo "  CONFIG_PCM_MULAW_DECODER"
+    echo "  CONFIG_ADPCM_G726_DECODER"
+    echo "  CONFIG_ADPCM_G726LE_DECODER"
+    echo "  CONFIG_AAC_DECODER"
+}
+
+download_ffmpeg_source
 build_arch "arm64" "iphoneos"
-
-# iOS Simulator (Apple Silicon + Intel)
 build_arch "arm64" "iphonesimulator"
 build_arch "x86_64" "iphonesimulator"
-
-# macOS (Apple Silicon + Intel)
 build_arch "arm64" "macosx"
 build_arch "x86_64" "macosx"
-
-# ==========================================
-# 3. 合并静态库 (Lipo)
-#    注意：只处理 avcodec, avformat, avutil
-#    (移除了 swscale/swresample，因为上面 disable 了)
-# ==========================================
-echo "Merging architectures..."
-
-mkdir -p "$FAT_DIR/ios" "$FAT_DIR/simulator" "$FAT_DIR/macos"
-
-libs=("libavcodec" "libavformat" "libavutil")
-
-for lib in "${libs[@]}"; do
-    # 3.1 iOS Device (只有 arm64，直接拷贝)
-    cp "$THIN_DIR/iphoneos/arm64/lib/$lib.a" "$FAT_DIR/ios/$lib.a"
-    
-    # 3.2 iOS Simulator (arm64 + x86_64 合并)
-    lipo -create \
-        "$THIN_DIR/iphonesimulator/arm64/lib/$lib.a" \
-        "$THIN_DIR/iphonesimulator/x86_64/lib/$lib.a" \
-        -output "$FAT_DIR/simulator/$lib.a"
-
-    # 3.3 macOS (arm64 + x86_64 合并)
-    lipo -create \
-        "$THIN_DIR/macosx/arm64/lib/$lib.a" \
-        "$THIN_DIR/macosx/x86_64/lib/$lib.a" \
-        -output "$FAT_DIR/macos/$lib.a"
-done
-
-# ==========================================
-# 4. 生成 XCFramework
-# ==========================================
-echo "Creating XCFrameworks..."
-mkdir -p "$OUTPUT_DIR/xcframeworks"
-
-for lib in "${libs[@]}"; do
-    # 头文件是一样的，取一份即可
-    HEADERS="$THIN_DIR/iphoneos/arm64/include"
-    
-    xcodebuild -create-xcframework \
-        -library "$FAT_DIR/ios/$lib.a" -headers "$HEADERS" \
-        -library "$FAT_DIR/simulator/$lib.a" -headers "$HEADERS" \
-        -library "$FAT_DIR/macos/$lib.a" -headers "$HEADERS" \
-        -output "$OUTPUT_DIR/xcframeworks/$lib.xcframework"
-done
-
-echo "🎉 Build Complete! Artifacts are in: $OUTPUT_DIR/xcframeworks"
+create_xcframeworks
+print_decoder_hints
