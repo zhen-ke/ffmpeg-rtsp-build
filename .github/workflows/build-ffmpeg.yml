@@ -4,15 +4,15 @@ on:
   workflow_dispatch:
     inputs:
       ffmpeg_version:
-        description: FFmpeg version (for example: 7.1.1)
+        description: "FFmpeg version (for example: 7.1.1)"
         required: true
         default: "7.1.1"
       ios_min:
-        description: iOS deployment target
+        description: "iOS deployment target"
         required: true
         default: "16.0"
       macos_min:
-        description: macOS deployment target
+        description: "macOS deployment target"
         required: true
         default: "13.0"
 
