@@ -1,31 +1,34 @@
-name: Build FFmpeg XCFramework
+name: Build FFmpeg RTSP XCFramework
 
 on:
   workflow_dispatch:
     inputs:
       ffmpeg_version:
-        description: "FFmpeg version (for example: 7.1.1)"
+        description: 'FFmpeg Version'
         required: true
-        default: "7.1.1"
+        default: '7.1.1'
       ios_min:
-        description: "iOS deployment target"
+        description: 'iOS deployment target'
         required: true
-        default: "16.0"
+        default: '16.0'
       macos_min:
-        description: "macOS deployment target"
+        description: 'macOS deployment target'
         required: true
-        default: "13.0"
+        default: '13.0'
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-latest
     timeout-minutes: 120
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Build XCFrameworks
+      - name: Install Dependencies
+        run: |
+          brew install nasm yasm
+
+      - name: Build FFmpeg
         env:
           IOS_MIN: ${{ inputs.ios_min }}
           MACOS_MIN: ${{ inputs.macos_min }}
@@ -33,7 +36,7 @@ jobs:
           chmod +x scripts/build_ffmpeg_xcframework.sh
           scripts/build_ffmpeg_xcframework.sh "${{ inputs.ffmpeg_version }}"
 
-      - name: Upload artifacts
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ffmpeg-xcframeworks-${{ inputs.ffmpeg_version }}
