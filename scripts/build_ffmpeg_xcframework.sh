@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# IPCams FFmpeg build script
+# CamScope FFmpeg build script
 # - Builds only what this project uses (avformat/avcodec/avutil)
 # - Video decode is done by VideoToolbox, so swscale/swresample are not required
 
@@ -44,6 +44,7 @@ download_ffmpeg_source() {
 COMMON_FLAGS=(
     --disable-everything
     --disable-autodetect
+    --disable-x86asm
     --disable-debug
     --disable-doc
     --disable-programs
@@ -61,6 +62,10 @@ COMMON_FLAGS=(
     --enable-network
     --enable-protocol=file,rtp,rtsp,tcp,udp
     --enable-demuxer=rtsp,rtp,sdp,mov,mpegts
+    # Needed by recording backend B (FFmpeg remux):
+    # - mov muxer provides mov/mp4/m4a family outputs
+    # - matroska/mpegts are useful fallback containers
+    --enable-muxer=mov,matroska,mpegts
     --enable-parser=h264,hevc,aac
     --enable-decoder=aac,pcm_alaw,pcm_mulaw,adpcm_g726,adpcm_g726le
     --enable-bsf=h264_mp4toannexb,hevc_mp4toannexb,aac_adtstoasc
@@ -127,7 +132,13 @@ create_xcframeworks() {
             "${THIN_DIR}/macosx/x86_64/lib/${lib}.a" \
             -output "${FAT_DIR}/macos/${lib}.a"
 
-        local headers="${THIN_DIR}/iphoneos/arm64/include"
+        # Keep header sets isolated per library to avoid Xcode duplicate-header
+        # collisions ("Multiple commands produce .../include/libavcodec/...").
+        local headers="${THIN_DIR}/iphoneos/arm64/include/${lib}"
+        if [[ ! -d "${headers}" ]]; then
+            echo "Missing headers for ${lib}: ${headers}" >&2
+            exit 1
+        fi
         xcodebuild -create-xcframework \
             -library "${FAT_DIR}/ios/${lib}.a" -headers "${headers}" \
             -library "${FAT_DIR}/simulator/${lib}.a" -headers "${headers}" \
@@ -147,6 +158,9 @@ print_decoder_hints() {
     echo "  CONFIG_ADPCM_G726_DECODER"
     echo "  CONFIG_ADPCM_G726LE_DECODER"
     echo "  CONFIG_AAC_DECODER"
+    echo "  CONFIG_MOV_MUXER"
+    echo "  CONFIG_MATROSKA_MUXER"
+    echo "  CONFIG_MPEGTS_MUXER"
 }
 
 download_ffmpeg_source
