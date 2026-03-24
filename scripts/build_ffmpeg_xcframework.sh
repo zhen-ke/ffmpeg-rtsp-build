@@ -132,17 +132,21 @@ create_xcframeworks() {
             "${THIN_DIR}/macosx/x86_64/lib/${lib}.a" \
             -output "${FAT_DIR}/macos/${lib}.a"
 
-        # Keep header sets isolated per library to avoid Xcode duplicate-header
-        # collisions ("Multiple commands produce .../include/libavcodec/...").
-        local headers="${THIN_DIR}/iphoneos/arm64/include/${lib}"
-        if [[ ! -d "${headers}" ]]; then
-            echo "Missing headers for ${lib}: ${headers}" >&2
+        # Keep header sets isolated per library and nested inside a directory
+        # to avoid Xcode duplicate-header collisions ("Multiple commands produce .../include/version.h").
+        local raw_headers="${THIN_DIR}/iphoneos/arm64/include/${lib}"
+        if [[ ! -d "${raw_headers}" ]]; then
+            echo "Missing headers for ${lib}: ${raw_headers}" >&2
             exit 1
         fi
+        local temp_headers="${FAT_DIR}/headers_staging/${lib}"
+        mkdir -p "${temp_headers}/${lib}"
+        cp -R "${raw_headers}/"* "${temp_headers}/${lib}/"
+
         xcodebuild -create-xcframework \
-            -library "${FAT_DIR}/ios/${lib}.a" -headers "${headers}" \
-            -library "${FAT_DIR}/simulator/${lib}.a" -headers "${headers}" \
-            -library "${FAT_DIR}/macos/${lib}.a" -headers "${headers}" \
+            -library "${FAT_DIR}/ios/${lib}.a" -headers "${temp_headers}" \
+            -library "${FAT_DIR}/simulator/${lib}.a" -headers "${temp_headers}" \
+            -library "${FAT_DIR}/macos/${lib}.a" -headers "${temp_headers}" \
             -output "${XCFRAMEWORK_DIR}/${lib}.xcframework"
     done
 }
