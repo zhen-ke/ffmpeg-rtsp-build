@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# CamScope FFmpeg build script
+# CamHub FFmpeg build script
 # - Builds only what this project uses (avformat/avcodec/avutil)
 # - Video decode is done by VideoToolbox, so swscale/swresample are not required
 
@@ -61,7 +61,7 @@ COMMON_FLAGS=(
     --enable-avutil
     --enable-network
     --enable-protocol=file,rtp,rtsp,tcp,udp
-    --enable-demuxer=rtsp,rtp,sdp,mov,mpegts
+    --enable-demuxer=rtsp,rtp,sdp,mov,mpegts,matroska
     # Needed by recording backend B (FFmpeg remux):
     # - mov muxer provides mov/mp4/m4a family outputs
     # - matroska/mpegts are useful fallback containers
@@ -158,6 +158,7 @@ print_decoder_hints() {
     echo "  CONFIG_ADPCM_G726_DECODER"
     echo "  CONFIG_ADPCM_G726LE_DECODER"
     echo "  CONFIG_AAC_DECODER"
+    echo "  CONFIG_MATROSKA_DEMUXER"
     echo "  CONFIG_MOV_MUXER"
     echo "  CONFIG_MATROSKA_MUXER"
     echo "  CONFIG_MPEGTS_MUXER"
