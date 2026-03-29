@@ -61,7 +61,7 @@ COMMON_FLAGS=(
     --enable-avutil
     --enable-network
     --enable-protocol=file,rtp,rtsp,tcp,udp
-    --enable-demuxer=rtsp,rtp,sdp,mov,mpegts
+    --enable-demuxer=rtsp,rtp,sdp,mov,mpegts,matroska
     # Needed by recording backend (FFmpeg remux):
     # - mov muxer provides mov/mp4/m4a family outputs
     # - matroska/mpegts are useful fallback containers
