@@ -61,13 +61,18 @@ COMMON_FLAGS=(
     --enable-avutil
     --enable-network
     --enable-protocol=file,rtp,rtsp,tcp,udp
-    --enable-demuxer=rtsp,rtp,sdp,mov,mpegts,matroska
-    # Needed by recording backend B (FFmpeg remux):
+    --enable-demuxer=rtsp,rtp,sdp,mov,mpegts
+    # Needed by recording backend (FFmpeg remux):
     # - mov muxer provides mov/mp4/m4a family outputs
     # - matroska/mpegts are useful fallback containers
     --enable-muxer=mov,matroska,mpegts
+    # Parsers for stream analysis
     --enable-parser=h264,hevc,aac
+    # Audio decoders for RTSP streams (G.726/G.711/AAC)
     --enable-decoder=aac,pcm_alaw,pcm_mulaw,adpcm_g726,adpcm_g726le
+    # Audio encoder for transcoding incompatible audio to AAC for MP4
+    --enable-encoder=aac
+    # Bitstream filters for format conversion
     --enable-bsf=h264_mp4toannexb,hevc_mp4toannexb,aac_adtstoasc
     --enable-cross-compile
     --enable-pic
@@ -132,21 +137,17 @@ create_xcframeworks() {
             "${THIN_DIR}/macosx/x86_64/lib/${lib}.a" \
             -output "${FAT_DIR}/macos/${lib}.a"
 
-        # Keep header sets isolated per library and nested inside a directory
-        # to avoid Xcode duplicate-header collisions ("Multiple commands produce .../include/version.h").
-        local raw_headers="${THIN_DIR}/iphoneos/arm64/include/${lib}"
-        if [[ ! -d "${raw_headers}" ]]; then
-            echo "Missing headers for ${lib}: ${raw_headers}" >&2
+        # Keep header sets isolated per library to avoid Xcode duplicate-header
+        # collisions ("Multiple commands produce .../include/libavcodec/...").
+        local headers="${THIN_DIR}/iphoneos/arm64/include/${lib}"
+        if [[ ! -d "${headers}" ]]; then
+            echo "Missing headers for ${lib}: ${headers}" >&2
             exit 1
         fi
-        local temp_headers="${FAT_DIR}/headers_staging/${lib}"
-        mkdir -p "${temp_headers}/${lib}"
-        cp -R "${raw_headers}/"* "${temp_headers}/${lib}/"
-
         xcodebuild -create-xcframework \
-            -library "${FAT_DIR}/ios/${lib}.a" -headers "${temp_headers}" \
-            -library "${FAT_DIR}/simulator/${lib}.a" -headers "${temp_headers}" \
-            -library "${FAT_DIR}/macos/${lib}.a" -headers "${temp_headers}" \
+            -library "${FAT_DIR}/ios/${lib}.a" -headers "${headers}" \
+            -library "${FAT_DIR}/simulator/${lib}.a" -headers "${headers}" \
+            -library "${FAT_DIR}/macos/${lib}.a" -headers "${headers}" \
             -output "${XCFRAMEWORK_DIR}/${lib}.xcframework"
     done
 }
@@ -162,7 +163,7 @@ print_decoder_hints() {
     echo "  CONFIG_ADPCM_G726_DECODER"
     echo "  CONFIG_ADPCM_G726LE_DECODER"
     echo "  CONFIG_AAC_DECODER"
-    echo "  CONFIG_MATROSKA_DEMUXER"
+    echo "  CONFIG_AAC_ENCODER"
     echo "  CONFIG_MOV_MUXER"
     echo "  CONFIG_MATROSKA_MUXER"
     echo "  CONFIG_MPEGTS_MUXER"
